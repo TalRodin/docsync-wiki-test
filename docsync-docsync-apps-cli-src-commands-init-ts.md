@@ -4,21 +4,21 @@
 
 ## Overview
 
-Command-line initialization workflow for DocSync that handles user authentication, project creation, payment processing, and integration setup. Guides users through selecting a documentation destination (Notion, Google Docs, Confluence, GitHub Wiki, or Readme.io), configuring OAuth integrations, and setting up optional notifications through Slack, Linear, and GitHub.
+This module implements the initialization command for the DocSync CLI. It handles user authentication, project setup, destination platform configuration (Notion, Google Docs, Confluence, GitHub Wiki, Readme.io), payment processing, and optional integrations with Slack, Linear, and GitHub. Configuration is saved to `~/.docsync/config.json` for subsequent CLI operations.
 
 ## Functions
 
 ### `question(prompt: string): Promise<string>`
 
-Prompts the user for input via the command line and returns their response.
+Prompts the user for input via the command line and returns the response.
 
 **Parameters:**
-- `prompt` (string) - The text to display to the user
+- `prompt` (string): The text to display to the user
 
 **Returns:**
-- `Promise<string>` - The user's input as a string
+- `Promise<string>`: Resolves with the user's input
 
-**Usage:**
+**Example:**
 ```typescript
 const email = await question('Email: ')
 ```
@@ -27,91 +27,96 @@ const email = await question('Email: ')
 
 ### `initCommand(): Promise<void>`
 
-Main initialization command that orchestrates the entire DocSync setup process.
+Main initialization workflow for DocSync. Handles the complete setup process including authentication, destination selection, payment, and configuration file creation.
 
 **Parameters:**
 None
 
 **Returns:**
-- `Promise<void>` - Completes when initialization is finished or fails
+- `Promise<void>`: Resolves when initialization completes or fails
 
-**Usage:**
+**Workflow:**
+1. Prompts for email and password
+2. Authenticates with DocSync API (`/auth/signin`)
+3. Creates a new project using current directory name
+4. Prompts for destination platform selection (Notion, Google Docs, Confluence, GitHub Wiki, Readme.io)
+5. Prompts for pricing plan (Solo, Corporate, Enterprise)
+6. Handles OAuth flows for selected destination:
+   - **Notion**: Opens browser for OAuth, collects access token and parent page ID
+   - **Google Docs**: Opens browser for OAuth, collects access and refresh tokens
+   - **Confluence**: Opens browser for OAuth, collects tokens, allows space selection, creates root page
+   - **Readme.io**: Prompts for API key
+7. Creates Stripe checkout session and opens payment URL
+8. Waits for payment verification (polls `/billing/status` up to 10 times)
+9. Optionally configures Slack webhook for notifications
+10. Optionally configures Linear integration (OAuth + team selection)
+11. Optionally configures GitHub integration (OAuth + webhook setup)
+12. Writes configuration to `~/.docsync/config.json`
+
+**Example:**
 ```typescript
 import { initCommand } from './commands/init'
 
 await initCommand()
 ```
 
-**Process Flow:**
-1. Collects email and password credentials
-2. Authenticates user via `/auth/signin` endpoint
-3. Creates a new project using current directory name
-4. Prompts for documentation destination selection (1-5)
-5. Handles destination-specific OAuth flows:
-   - **Notion**: Opens browser for authorization, collects access token and parent page ID
-   - **Google Docs**: Opens browser for OAuth, collects access and refresh tokens
-   - **Confluence**: Opens browser for OAuth, collects tokens, lists available spaces, creates root page
-   - **GitHub Wiki**: Standard setup
-   - **Readme.io**: Collects API key
-6. Prompts for billing plan selection (Solo/Corporate/Enterprise)
-7. Creates Stripe checkout session and opens payment URL
-8. Polls `/billing/status` endpoint to verify payment (max 10 attempts, 2s interval)
-9. Optionally configures Slack webhook notifications
-10. Optionally configures Linear integration for issue creation
-11. Optionally configures GitHub integration for PR comments
-12. Saves configuration to `~/.docsync/config.json`
+**Error Handling:**
+- API errors are displayed with `chalk.red()`
+- Invalid user choices result in early termination
+- Network errors are caught and displayed
 
-**Configuration File Structure:**
+## Configuration File
+
+The command creates `~/.docsync/config.json` with the following structure:
+
 ```json
 {
-  "token": "session_access_token",
-  "refreshToken": "session_refresh_token",
-  "email": "user@example.com",
-  "destination": "notion|googledocs|confluence|githubwiki|readme",
-  "projectId": "uuid",
-  "cloudId": "confluence_cloud_id",
-  "spaceId": "confluence_space_id",
-  "notionToken": "notion_access_token",
-  "googleToken": "google_access_token",
-  "googleRefreshToken": "google_refresh_token",
-  "confluenceToken": "confluence_access_token",
-  "confluenceRefreshToken": "confluence_refresh_token",
-  "parentPageId": "parent_page_id",
-  "slackWebhookUrl": "https://hooks.slack.com/...",
-  "githubToken": "github_access_token",
-  "githubRepo": "username/repo",
-  "linearToken": "linear_access_token",
-  "linearTeamId": "linear_team_id"
+  "token": "string",
+  "refreshToken": "string",
+  "email": "string",
+  "destination": "notion | googledocs | confluence | githubwiki | readme",
+  "projectId": "string",
+  "cloudId": "string (Confluence only)",
+  "spaceId": "string (Confluence only)",
+  "notionToken": "string (optional)",
+  "googleToken": "string (optional)",
+  "googleRefreshToken": "string (optional)",
+  "confluenceToken": "string (optional)",
+  "confluenceRefreshToken": "string (optional)",
+  "parentPageId": "string",
+  "slackWebhookUrl": "string (optional)",
+  "githubToken": "string (optional)",
+  "githubRepo": "string (optional)",
+  "linearToken": "string (optional)",
+  "linearTeamId": "string (optional)"
 }
 ```
 
-## API Endpoints Used
+## API Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/auth/signin` | POST | User authentication |
-| `/projects/create` | POST | Create new project |
-| `/auth/notion/url` | GET | Get Notion OAuth URL |
-| `/auth/google/url` | GET | Get Google OAuth URL |
-| `/auth/confluence/url` | GET | Get Confluence OAuth URL |
-| `/auth/confluence/resources` | POST | Fetch Confluence cloud resources |
-| `/auth/confluence/spaces` | POST | List available Confluence spaces |
-| `/auth/confluence/create-root-page` | POST | Create root documentation page |
-| `/billing/checkout` | POST | Create Stripe checkout session |
-| `/billing/status` | GET | Verify payment completion |
-| `/auth/linear/url` | GET | Get Linear OAuth URL |
-| `/auth/linear/teams` | GET | List Linear teams |
-| `/auth/github/url` | GET | Get GitHub OAuth URL |
-| `/auth/github/setup-webhook` | POST | Configure GitHub webhook |
+The following external API endpoints are called:
+
+- `POST https://docsync-api.onrender.com/auth/signin`
+- `POST https://docsync-api.onrender.com/projects/create`
+- `GET https://docsync-api.onrender.com/auth/notion/url`
+- `GET https://docsync-api.onrender.com/auth/google/url`
+- `GET https://docsync-api.onrender.com/auth/confluence/url`
+- `POST https://docsync-api.onrender.com/auth/confluence/resources`
+- `POST https://docsync-api.onrender.com/auth/confluence/spaces`
+- `POST https://docsync-api.onrender.com/auth/confluence/create-root-page`
+- `POST https://docsync-api.onrender.com/billing/checkout`
+- `GET https://docsync-api.onrender.com/billing/status`
+- `GET https://docsync-api.onrender.com/auth/linear/url`
+- `GET https://docsync-api.onrender.com/auth/linear/teams`
+- `GET https://docsync-api.onrender.com/auth/github/url`
+- `POST https://docsync-api.onrender.com/auth/github/setup-webhook`
 
 ## Notes
 
-- All OAuth flows use browser-based authorization with manual token copy-paste
-- Configuration is stored in plaintext at `~/.docsync/config.json` containing sensitive tokens
-- Payment verification uses polling with 20-second timeout (10 attempts × 2 seconds)
-- Browser opening uses macOS-specific `open` command via `child_process.exec`
-- No validation on user input for email, passwords, or tokens
-- Error handling terminates process on authentication or network failures
-- Linear integration code appears duplicated in two separate conditional blocks
-- Readme.io API key is collected but not saved to configuration file
-- Confluence automatically creates a "DocSync" root page in the selected space
+- Requires `child_process.exec` with `open` command (macOS/Linux) to launch browser windows
+- Payment verification polls every 2 seconds for up to 20 seconds
+- Readline interface (`rl`) must be manually closed on all exit paths
+- Configuration directory `~/.docsync` is created if it doesn't exist
+- OAuth flows redirect users to browser and require manual token copy-paste
+- GitHub Wiki and Readme.io destinations are listed in the menu but only Readme.io has implementation logic
+- Linear integration appears twice in the code (once as destination, once as optional notification setup)
